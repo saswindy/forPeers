@@ -1,0 +1,155 @@
+---
+title: "LearningMachine"
+author: "saswindy"
+date: "Sunday, October 19, 2014"
+output: html_document
+---
+
+
+## Executive summary  
+The goal of the project is to predict the manner in which the participant did the 
+exercise. As a reminder [ref 1], the 6 male participants aged between 20-28 years, 
+were asked to perform barbell lifts correctly and incorrectly in 5 different ways, 
+this is the "classe" variable in the training set representing the follwowing 
+information:  
+
+  *  Class **A:** exercise exactly according to the specification. (correct)  
+  *  Class **B:** throwing the elbows to the front. (incorrect)  
+  *  Class **C:** lifting the dumbbell only halfway. (incorrect)  
+  *  Class **D:** lowering the dumbbell only halfway. (incorrect)  
+  *  Class **E:** throwing the hips to the front. (incorrect)  
+
+It is also to predict 20 different test cases using the chosen model.
+
+## Exploratory data analysis  
+* set the environment  
+```{r,echo=TRUE, message=FALSE, results='hide', warning=FALSE}
+library(knitr)
+opts_chunk$set(cache=TRUE,echo=TRUE)
+library(caret)
+library(ggplot2)
+library(randomForest)
+Sys.setlocale("LC_ALL", "English")
+```
+
+* upload the data  
+```{r, warning=FALSE}
+if (!file.exists("pml-testing.csv")) {
+    download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml-testing.csv", method = "auto")
+}
+if (!file.exists("pml-training.csv")) {
+    download.file(url = "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml-training.csv", method = "auto")
+}
+testingorig  <- read.csv('pml-testing.csv', na.strings = c("NA",""))
+trainingorig <- read.csv('pml-training.csv', na.strings = c("NA",""))
+```
+* get an idea about the data  
+
+There are `r nrow(testingorig)` observations in the test set and `r nrow(trainingorig)` 
+in the training set. Both sets have `r ncol(trainingorig)` variables.  
+When looking at the str(testingorig) and str(trainingorig) results a lot of variables 
+contain NA values.  
+
+```{r echo=FALSE, results='hide', warning=FALSE}
+str(testingorig)
+str(trainingorig)
+```
+The first check is to ensure both sets of data are related. Then, looking at the
+column names we notice that the first 7 columns are not interesting for the analysis
+so they are removed. Then, in the testing set when looking at the number of NA values several columns contain **only** NA values. These columns are not interesting for the analysis therefore they are dropped from both sets. 
+
+```{r, warning=FALSE}
+nametest <- names(testingorig)
+nametrain <- names(trainingorig)
+which(is.na(match(nametest, nametrain)))
+names(testingorig)[which(is.na(match(nametest, nametrain)))]
+names(trainingorig)[which(is.na(match(nametest, nametrain)))]
+
+testingremcol  <- testingorig[, c(7:160)]
+trainingremcol <- trainingorig[, c(7:160)]
+a <- which(apply(is.na(trainingremcol), 2, sum) >= 15000)
+testingnona <- testingremcol[,-a]
+trainingnona <- trainingremcol [,-a]
+```
+
+Finally check in the training set (the one with removed columns) demonstrates that 
+there is no other NA value.  
+```{r, warning=FALSE}
+sum(is.na(trainingnona))
+```
+
+## Analysis  
+As, explained in the 2013.Velloso.QAR-WLE document [ref 1], "because of the 
+characteristic noise in the sensor data" and because the algorithm used by this 
+methode is pretty accurate, I am going to use the **Random Forest** approach 
+using the "Bagging method".  Also, it is known that this approach can lead to a 
+little bit of overfitting therefore a **cross validation** will also be used.  
+
+* Forest approach  
+Using the tidy training dataset prepared in the "explanatory data analysis" section, a partition is created as well as the corresponding training and testing sets. (nammed trainingp and testingp, "p" for partition).  
+Then a model is generated unsing the training partion set to fit the outcome to 
+be **classe** and to use any of the other predictive variables as potential predictors.  
+Note: another partition was done using p = 0.6 but the model fitted using that partition
+was not 100% meeting the 20 predicted answers (1 out of 20 was wrong). With p=0.7
+the model fitted predicts all the 20 answers correctly.
+
+```{r, warning=FALSE}
+partition <- createDataPartition(y = trainingnona$classe, p = 0.7, list = FALSE)
+trainingp <- trainingnona[partition, ]
+testingp <- trainingnona[-partition, ]
+
+modelfit2 <- train(classe~., data = trainingp, method = "rf", prox = TRUE)
+
+modelfit2
+modelfit2$finalModel
+
+```
+
+Accuracy of the model was reach using `r modelfit2$bestTune[1,]` input variables 
+(mtry).  Because at each step the accuracy is high, the error rate  should be 
+very low.  
+When looking at the final model results, we can see that the error rate is 0.22%, 
+very low as expected, under 1%.  
+In the next section a crossvalidation will be done because the accuracy of the 
+training data is always optimistic.  
+
+* out of sample error with cross-validation  
+In this section the random subsampling testingp data set, created based on the 
+partition, is used as a validation data set to get a better estimate.  
+
+```{r, warning=FALSE}
+prediction <- predict(modelfit2, testingp)
+confusionMatrix(prediction, testingp$classe)
+```
+
+Looking at the confusion matrix, the Accuracy is 99.7% meaning that the error rate 
+is very very low. This meets the information we had in the previous section.
+
+* prediction of 20 new values  
+The data set used at this stage is the origninal testing set without NA values, 
+not the set created witht the partition.
+```{r, warning=FALSE}
+answers <- as.character(predict(modelfit2, testingnona))
+answers
+
+pml_write_files = function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file = filename, quote = FALSE, row.names = FALSE,
+            col.names = FALSE)
+    }
+}
+
+pml_write_files(answers)
+```
+
+## References  
+
+[1] Human Activity Recoggnition main information  
+
+    http://groupware.les.inf.puc-rio.br/har                   
+[2] Analysis 2013.Velloso.QAR-WLE  
+
+    http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201    
+    
